@@ -1,17 +1,28 @@
-name: Publish Docker image (Multi Registries, native amd64+arm64)
+name: Build and Push Yivionapi Docker Image
+
+# This workflow automatically builds and pushes Yivionapi Docker images
+# when the fork is synced from upstream or when triggered manually
 
 on:
   push:
-    tags:
-      - '*'
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual trigger'
+        required: false
+        default: 'Manual build'
 
 env:
   # Configure your DockerHub repository name here
+  # Format: <dockerhub-username>/yivionapi
   DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_USERNAME }}/yivionapi
 
 jobs:
   build_single_arch:
-    name: Build & push (${{ matrix.arch }}) [native]
+    name: Build & push (${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
@@ -23,24 +34,24 @@ jobs:
             platform: linux/arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-
     permissions:
       packages: write
       contents: read
-
     steps:
       - name: Check out (shallow)
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Resolve tag & write VERSION
+      - name: Determine version
+        id: version
         run: |
-          git fetch --tags --force --depth=1
-          TAG=${GITHUB_REF#refs/tags/}
-          echo "TAG=$TAG" >> $GITHUB_ENV
-          echo "$TAG" > VERSION
-          echo "Building tag: $TAG for ${{ matrix.arch }}"
+          # Use date and short commit hash as version
+          VERSION="$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
+          echo "$VERSION" > VERSION
+          echo "value=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Publishing version: $VERSION for ${{ matrix.arch }}"
 
       - name: Normalize GHCR repository
         run: echo "GHCR_REPOSITORY=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
@@ -69,16 +80,16 @@ jobs:
             ${{ env.DOCKERHUB_REPO }}
             ghcr.io/${{ env.GHCR_REPOSITORY }}
 
-      - name: Build & push single-arch (to both registries)
+      - name: Build & push single-arch
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: ${{ matrix.platform }}
           push: true
           tags: |
-            ${{ env.DOCKERHUB_REPO }}:${{ env.TAG }}-${{ matrix.arch }}
+            ${{ env.DOCKERHUB_REPO }}:${{ steps.version.outputs.value }}-${{ matrix.arch }}
             ${{ env.DOCKERHUB_REPO }}:latest-${{ matrix.arch }}
-            ghcr.io/${{ env.GHCR_REPOSITORY }}:${{ env.TAG }}-${{ matrix.arch }}
+            ghcr.io/${{ env.GHCR_REPOSITORY }}:${{ steps.version.outputs.value }}-${{ matrix.arch }}
             ghcr.io/${{ env.GHCR_REPOSITORY }}:latest-${{ matrix.arch }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -87,19 +98,27 @@ jobs:
           sbom: false
 
   create_manifests:
-    name: Create multi-arch manifests (Docker Hub + GHCR)
+    name: Create multi-arch manifests
     needs: [build_single_arch]
     runs-on: ubuntu-latest
     permissions:
       packages: write
       contents: read
-    if: startsWith(github.ref, 'refs/tags/')
     steps:
-      - name: Extract tag
-        run: echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+      - name: Check out (shallow)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Normalize GHCR repository
         run: echo "GHCR_REPOSITORY=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+
+      - name: Determine version
+        id: version
+        run: |
+          VERSION="$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
+          echo "value=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
@@ -114,14 +133,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create & push manifest (Docker Hub - version)
+      - name: Create & push manifest (Docker Hub - versioned)
         env:
           DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_USERNAME }}/yivionapi
         run: |
           docker buildx imagetools create \
-            -t ${DOCKERHUB_REPO}:${TAG} \
-            ${DOCKERHUB_REPO}:${TAG}-amd64 \
-            ${DOCKERHUB_REPO}:${TAG}-arm64
+            -t ${DOCKERHUB_REPO}:${VERSION} \
+            ${DOCKERHUB_REPO}:${VERSION}-amd64 \
+            ${DOCKERHUB_REPO}:${VERSION}-arm64
 
       - name: Create & push manifest (Docker Hub - latest)
         env:
@@ -132,12 +151,12 @@ jobs:
             ${DOCKERHUB_REPO}:latest-amd64 \
             ${DOCKERHUB_REPO}:latest-arm64
 
-      - name: Create & push manifest (GHCR - version)
+      - name: Create & push manifest (GHCR - versioned)
         run: |
           docker buildx imagetools create \
-            -t ghcr.io/${GHCR_REPOSITORY}:${TAG} \
-            ghcr.io/${GHCR_REPOSITORY}:${TAG}-amd64 \
-            ghcr.io/${GHCR_REPOSITORY}:${TAG}-arm64
+            -t ghcr.io/${GHCR_REPOSITORY}:${VERSION} \
+            ghcr.io/${GHCR_REPOSITORY}:${VERSION}-amd64 \
+            ghcr.io/${GHCR_REPOSITORY}:${VERSION}-arm64
 
       - name: Create & push manifest (GHCR - latest)
         run: |
@@ -145,3 +164,11 @@ jobs:
             -t ghcr.io/${GHCR_REPOSITORY}:latest \
             ghcr.io/${GHCR_REPOSITORY}:latest-amd64 \
             ghcr.io/${GHCR_REPOSITORY}:latest-arm64
+
+      - name: Summary
+        run: |
+          echo "✅ Successfully built and pushed Yivionapi Docker images!"
+          echo "🐳 Docker Hub: ${{ secrets.DOCKERHUB_USERNAME }}/yivionapi:latest"
+          echo "🐳 Docker Hub: ${{ secrets.DOCKERHUB_USERNAME }}/yivionapi:${VERSION}"
+          echo "📦 GHCR: ghcr.io/${GHCR_REPOSITORY}:latest"
+          echo "📦 GHCR: ghcr.io/${GHCR_REPOSITORY}:${VERSION}"

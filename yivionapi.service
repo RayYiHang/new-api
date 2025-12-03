@@ -1,0 +1,18 @@
+# File path: /etc/systemd/system/yivionapi.service
+# sudo systemctl daemon-reload
+# sudo systemctl start yivionapi
+# sudo systemctl enable yivionapi
+# sudo systemctl status yivionapi
+[Unit]
+Description=Yivionapi Service
+After=network.target
+
+[Service]
+User=ubuntu  # 注意修改用户名
+WorkingDirectory=/path/to/yivionapi  # 注意修改路径
+ExecStart=/path/to/yivionapi/yivionapi --port 3000 --log-dir /path/to/yivionapi/logs  # 注意修改路径和端口号
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -10,6 +10,10 @@ on:
         description: "reason"
         required: false
 
+env:
+  # Configure your DockerHub repository name here
+  DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_USERNAME }}/yivionapi
+
 jobs:
   build_single_arch:
     name: Build & push (${{ matrix.arch }}) [native]
@@ -66,7 +70,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            calciumion/new-api
+            ${{ env.DOCKERHUB_REPO }}
             ghcr.io/${{ env.GHCR_REPOSITORY }}
 
       - name: Build & push single-arch (to both registries)
@@ -76,8 +80,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           push: true
           tags: |
-            calciumion/new-api:alpha-${{ matrix.arch }}
-            calciumion/new-api:${{ steps.version.outputs.value }}-${{ matrix.arch }}
+            ${{ env.DOCKERHUB_REPO }}:alpha-${{ matrix.arch }}
+            ${{ env.DOCKERHUB_REPO }}:${{ steps.version.outputs.value }}-${{ matrix.arch }}
             ghcr.io/${{ env.GHCR_REPOSITORY }}:alpha-${{ matrix.arch }}
             ghcr.io/${{ env.GHCR_REPOSITORY }}:${{ steps.version.outputs.value }}-${{ matrix.arch }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -116,18 +120,22 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Create & push manifest (Docker Hub - alpha)
+        env:
+          DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_USERNAME }}/yivionapi
         run: |
           docker buildx imagetools create \
-            -t calciumion/new-api:alpha \
-            calciumion/new-api:alpha-amd64 \
-            calciumion/new-api:alpha-arm64
+            -t ${DOCKERHUB_REPO}:alpha \
+            ${DOCKERHUB_REPO}:alpha-amd64 \
+            ${DOCKERHUB_REPO}:alpha-arm64
 
       - name: Create & push manifest (Docker Hub - versioned alpha)
+        env:
+          DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_USERNAME }}/yivionapi
         run: |
           docker buildx imagetools create \
-            -t calciumion/new-api:${VERSION} \
-            calciumion/new-api:${VERSION}-amd64 \
-            calciumion/new-api:${VERSION}-arm64
+            -t ${DOCKERHUB_REPO}:${VERSION} \
+            ${DOCKERHUB_REPO}:${VERSION}-amd64 \
+            ${DOCKERHUB_REPO}:${VERSION}-arm64
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
